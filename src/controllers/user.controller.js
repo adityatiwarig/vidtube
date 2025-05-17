@@ -5,9 +5,9 @@ import  {uploadOnCloudinary } from "../utils/cloudinary.js";
 import  apiResponse  from "../utils/apiResponse.js";
 
 
-const registerUser = asyncHandler(async (req, res) => {     
-    const {fullName,email,password , username} = req.body    // REQ.BODY SE EXTRACT
-    console.log("email: ",email);
+const registerUser = asyncHandler(async (req, res) => {    
+
+    const {fullName, email, password , username} = req.body;  // REQ.BODY SE EXTRACT
 
     if(
         [fullName ,email,username,password].some ((field) =>     // AGR KOI FILED EMPTY TO 400
@@ -15,6 +15,8 @@ const registerUser = asyncHandler(async (req, res) => {
     ){
         throw new ApiError(400,"All fields are required")
     }
+
+    // console.log("EXISTED USED: ",existedUser);
     
     const existedUser = await User.findOne({
         $or : [{ username } , {email}]        // kya koi maatch kr rha hai username ya email
@@ -24,24 +26,32 @@ const registerUser = asyncHandler(async (req, res) => {
         throw new ApiError(409,"User with email or username already exists")  // 409 conflict error
     }
 
-    // console.log(req.files);
+    console.log(req.files);
+    
+
+     
    
    // jaise req.body data ka acccess deta hai waiseii req.files multer acess
 
-    const avatarLocalPath = req.files?.avatar[0]?.path;  // localpath KO EXTRACT KRELA
-    
+    const avatarLocalPath = req.files?.avatar[0]?.path;// localpath KO EXTRACT KRELA
+
     //multer ne wo file le hai and use apne server pe lete aaya hai
 
     // avatar[0] ye pehla obj hai to iska path mil jayega ho skta h n bhi mile
 
     const coverImageLocalPath = req.files?.coverImage[0]?.path;  //file ka naam coverImg
 
+    // console.log("Avatar Path:", avatarLocalPath);   // isme file ka loc aayega public--temp
+    // console.log("REQ. FILES: " ,req.files);         // isme file ka data aaeyga
+
+
 
     if(!avatarLocalPath){                 // AGR NA MILAL TA ERROR RETURN KRI
-
         throw new ApiError(400, "Avatar file required!!")
 
     }
+
+     // yha se AB CLOUDINARY.JS PADH K SAMJH KI KYA OR KU LIKHA H
 
     const avatar = await uploadOnCloudinary(avatarLocalPath)
     const coverImage = await uploadOnCloudinary(coverImageLocalPath)
@@ -51,9 +61,9 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
 
-    const user  = await User.create({    // MYA USER BNATA HAI
+    const user  = await User.create({    // nYA USER BNATA HAI
         fullName,                        // FULLNAME AS IT IS SAVE
-        avatar :avatar.url,              // UPLOAD KE BAAD KA URL
+        avatar : avatar.url,              // UPLOAD KE BAAD KA URL
         coverImage : coverImage?.url || "",
         email,
         password,
