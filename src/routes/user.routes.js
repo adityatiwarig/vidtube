@@ -1,6 +1,15 @@
 import { Router } from "express";
-import registerUser from "../controllers/user.controller.js";
+
+import { 
+    loginUser, 
+    logoutUser, 
+    registerUser,  
+    refreshAccessToken
+} from "../controllers/user.controller.js";
+
+import { verifyJWT } from "../middleware/auth.middleware.js";
 import { upload } from "../middleware/multer.middleware.js";
+
 
 const router = Router();
 
@@ -18,5 +27,11 @@ router.route("/register").post(
     ]),
     registerUser     // USER KI DETAIL HANDLE KI JATI H ITS (METHOD)  SAVES USERDATA
     )
+
+router.route("/login").post(loginUser)
+
+//secured routes
+router.route("/logout").post(verifyJWT,  logoutUser)   // pehle verifyJWT uske baad next
+router.route("/refresh-token").post(refreshAccessToken)
 
 export default router     // koi bhi name use krskte ho

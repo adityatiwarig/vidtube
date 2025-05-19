@@ -3,7 +3,27 @@ import { User } from "../models/user.model.js";
 import { ApiError } from "../utils/apiError.js";
 import  {uploadOnCloudinary } from "../utils/cloudinary.js"; 
 import  apiResponse  from "../utils/apiResponse.js";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken"
 
+const generateAccessAndRefreshToken = async(userId) => {
+    try {
+        const user = await User.findById(userId)
+        const accessToken = user.generateAccessToken()
+        const refreshToken = user.generateRefreshToken()
+
+        user.refreshToken = refreshToken
+
+        await user.save({ validateBeforeSave: false })
+
+        return {accessToken , refreshToken}
+        
+    } catch (error) {
+
+        throw new ApiError(500,"Something went wrong..")
+        
+    }
+}
 
 const registerUser = asyncHandler(async (req, res) => {    
 
@@ -39,7 +59,13 @@ const registerUser = asyncHandler(async (req, res) => {
 
     // avatar[0] ye pehla obj hai to iska path mil jayega ho skta h n bhi mile
 
-    const coverImageLocalPath = req.files?.coverImage[0]?.path;  //file ka naam coverImg
+    // const coverImageLocalPath = req.files?.coverImage[0]?.path;  //file ka naam coverImg
+
+    let coverImageLocalPath ;
+    
+    if(req.files && Array.isArray(req.files.coverImage) && req.files.coverImage.length > 0){
+        coverImageLocalPath = req.files.coverImage[0].path;
+    }
 
     // console.log("Avatar Path:", avatarLocalPath);   // isme file ka loc aayega public--temp
     // console.log("REQ. FILES: " ,req.files);         // isme file ka data aaeyga
@@ -84,4 +110,254 @@ const registerUser = asyncHandler(async (req, res) => {
 
 });
 
-export default registerUser;       // async func ka use to default kro
+const loginUser = asyncHandler(async(req,res) => {
+    //req body -> data
+    // username , email
+    // find the user
+    // password check
+    //  access and refresh tiken
+    // send cookie
+
+
+    const {username,password,email} = req.body;        //STEP1
+
+    if(!username && !email ){
+        throw new ApiError(400,"username or email required")     //STEP2
+    }
+
+    const user = await User.findOne({           //STEP3
+        $or : [{username},{email}]             // DONO ME SE KOI EK MIL JAYE
+    })
+
+    if(!user){
+        throw new ApiError(404,"User dont exist..")
+    }
+
+    const isPasswordValid = await user.isPasswordCorrect(password);  // PASSWORD WO WALA JO DIYE THE
+
+    if(!isPasswordValid){
+        throw new ApiError(401,"Invalid user credientials.")
+    }
+
+    const {accessToken,refreshToken} = await generateAccessAndRefreshToken(user._id)
+
+    const loggedInUser = await User.findById(user._id).select
+    ("-password -refreshToken")
+
+    const options ={
+        httpOnly : true,
+        secure : true,
+    }
+
+    return res.status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken , options)
+    .json(
+        new apiResponse(
+            200,
+            {
+                user : loggedInUser,accessToken,refreshToken
+            },
+            "User loggedIn successfully.."
+        )
+    )
+
+
+})
+
+const logoutUser = asyncHandler(async(req, res) => {
+
+    //user directly logout kroge to id nhi milega uska
+
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $set: {
+                refreshToken:undefined    // DB SE ABHI DEL NAHI HUA HAI BS UNDEFINED
+            }
+        },
+        {
+            new: true      // RETURN UPDATED DOC
+        }
+    )
+
+    const options = {          // SERVER ME HI CHANGES HOGA SECURED HAI ISILIYE
+        httpOnly: true,
+        secure: true
+    }
+
+    return res
+    .status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json(new apiResponse(200, {}, "User logged Out"))    // KOI DATA NAHI BHEJNA {}
+})
+
+const refreshAccessToken = asyncHandler(async(req,res)=>{
+    const incomingRefreshToken = req.cookie.refreshToken ||req.body.refreshToken
+
+    if(!incomingRefreshToken){
+        throw new ApiError(401,"unauthorized request")
+    }
+
+    try {
+        const decodedToken = jwt.verify(incomingRefreshToken,process.env.REFRESH_TOKEN_SECRET)
+    
+        const user = await User.findById(decodedToken?._id)
+    
+        if(!user){
+            throw new ApiError(401,"Invalid refresh token")
+        }
+    
+        if(incomingRefreshToken !== user?.refreshToken){
+            throw new ApiError(401,"Refresh token is expired or used")
+        }
+    
+        const options = {
+            httpOnly : true,
+            secure: true
+        }
+    
+        const {accessToken,newRefreshToken} = await generateAccessAndRefreshToken(user._id)
+    
+        return res
+        .status(200)
+        .cookie("accessToken",accessToken,options )
+        .cookie("refreshToken",newRefreshToken,options)
+        .json(
+            new apiResponse(
+                200,
+                {accessToken , refreshToken:newRefreshToken},
+                "accesstoken refreshed"
+            )
+        )
+    } catch (error) {
+        throw new ApiError(401, error?.message||"invalid refresh token")
+        
+    }
+})
+
+const updateCurrentPassword = asyncHandler(async(req,res)=>{
+    const {oldPassword,newPassword} = req.body;
+
+    const user = User.findById(req.user?._id);
+
+
+   const isPasswordCorrect = user.isPasswordCorrect(oldPassword)
+   
+   if(!isPasswordCorrect){
+    throw new ApiError(400,"Password is incorrect.")
+   }
+
+   user.password = newPassword;
+
+   await user.save({validateBeforeSave:false})
+
+   return res
+   .status(200)
+   .json(new apiResponse(200,{},"password changed successfully"))
+})
+
+const getCurrentUser = asyncHandler (async(req,res)=>{
+    return res
+    .status(200)
+    .json(new apiResponse(200,req.user,"user data fetched successfully."))
+})
+
+const updateAccountDetails = asyncHandler(async(req,res)=>{
+    const {fullName,email} = req.body;
+
+    if(!fullName || !email){
+        throw new ApiError(400,"Invalid user credentials")
+    }
+
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set :{
+                fullName,
+                email
+            }
+        },
+
+        {new:true}
+
+    ).select("-password")
+
+    return res
+    .status(200)
+    .json(new apiResponse(200,user,"Account details updated."))
+})
+
+const updateUserAvatar = asyncHandler(async(req,res)=>{
+   const avatarLocalPath = req.file?.path
+
+   if(!avatarLocalPath){
+    throw new ApiError(400,"Avatar file is requiered")
+   }
+
+   const avatar = await uploadOnCloudinary(avatarLocalPath)
+
+   if(!avatar.url){
+    throw new ApiError(400,"avatar url not found")
+   }
+
+   const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set :{
+                avatar:avatar.url
+            }
+        },
+
+        {new:true}
+
+    ).select("-password")
+
+    return res
+    .status(200)
+    .json(new apiResponse(200,res,"avatar file loaded"))
+
+
+})
+
+const updateUserCoverImage = asyncHandler(async(req, res) => {
+    const coverImageLocalPath = req.file?.path
+
+    if (!coverImageLocalPath) {
+        throw new ApiError(400, "Cover image file is missing")
+    }
+
+    const coverImage = await uploadOnCloudinary(coverImageLocalPath)
+
+    if (!coverImage.url) {
+        throw new ApiError(400, "Error while uploading on avatar")
+        
+    }
+
+    const user = await User.findByIdAndUpdate(
+        req.user?._id,
+        {
+            $set:{
+                coverImage: coverImage.url
+            }
+        },
+        {new: true}
+    ).select("-password")
+
+    return res
+    .status(200)
+    .json(
+        new apiResponse(200, user, "Cover image updated successfully")
+    )
+})
+
+export {
+registerUser,
+loginUser,
+logoutUser,
+refreshAccessToken,
+updateCurrentPassword,
+updateUserAvatar,
+updateCoverImage
+}       // async func ka use to default kro
