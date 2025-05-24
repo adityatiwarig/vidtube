@@ -13,3 +13,7 @@ import { DB_NAME } from "../constants.js";
  }
  
  export default connectDB
+
+ // mongodb_uri = mongodb:/localhost:200 --> url deta hai
+ // dbname = myapp
+ // mongodv:/localhost/myapp -->> aise hi dega
